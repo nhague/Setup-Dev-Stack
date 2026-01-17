@@ -2,7 +2,7 @@
 
 # --- Technical Specification ---
 # Name: setup-dev-stack.sh
-# Version: 2.1.0 (Self-Healing Edition)
+# Version: 2.1.1 (Self-Healing Edition)
 # ----------------------------------------------------------------
 
 # MODULE 0: NATIVE DEPENDENCY CHECK (Runs as User)
@@ -51,16 +51,26 @@ fi
 
 # MODULE 3: SSL AUTOMATION
 echo "Step 3/6: Automating SSL Trust..."
-# Fact: We must use the REAL_USER path for certs so they are accessible
+# Fact: Capture the real user to ensure paths and permissions match
 REAL_USER=${SUDO_USER:-$(whoami)}
 USER_HOME=$(eval echo "~$REAL_USER")
 CERT_DIR="$USER_HOME/certs/$CLIENT"
 
+# Action: Create directory and IMMEDIATELY give it to the user
 mkdir -p "$CERT_DIR"
-# Run mkcert as the real user to ensure it touches their local keychain
+chown "$REAL_USER" "$CERT_DIR" 
+
+# Action: Run mkcert as the real user so it can write to the folder
+echo "Fact: Generating certificates for $DOMAIN..."
 sudo -u "$REAL_USER" mkcert -install >/dev/null 2>&1
 sudo -u "$REAL_USER" mkcert -cert-file "$CERT_DIR/cert.pem" -key-file "$CERT_DIR/key.pem" \
     "$DOMAIN" "*.$DOMAIN" "localhost" "127.0.0.1" >/dev/null 2>&1
+
+# Verification: Check if files actually exist
+if [ ! -f "$CERT_DIR/cert.pem" ]; then
+    echo "Error: SSL Certificate generation failed in $CERT_DIR"
+    exit 1
+fi
 
 # MODULE 4: DNS SPOOFING
 echo "Step 4/6: Updating /etc/hosts..."
