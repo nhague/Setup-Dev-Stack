@@ -2,7 +2,7 @@
 
 # --- Technical Specification ---
 # Name: setup-dev-stack.sh
-# Version: 2.0.0 (Self-Healing Edition)
+# Version: 2.1.0 (Self-Healing Edition)
 # ----------------------------------------------------------------
 
 # MODULE 0: NATIVE DEPENDENCY CHECK (Runs as User)
