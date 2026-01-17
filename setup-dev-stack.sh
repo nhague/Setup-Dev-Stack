@@ -85,20 +85,31 @@ server {
     ssl_certificate $CERT_DIR/cert.pem;
     ssl_certificate_key $CERT_DIR/key.pem;
 
+    # HASURA GRAPHQL
     location /graphql {
         proxy_pass http://localhost:$H_PORT/v1/graphql;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
+    # KEYCLOAK AUTH (Strict Buffer Math for JWTs)
     location /auth {
         proxy_pass http://localhost:$K_PORT/auth;
         proxy_set_header Host \$host;
-        proxy_buffer_size 128k;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        
+        # Fact: Buffer math must be consistent
+        proxy_buffer_size          128k;
+        proxy_buffers              4 256k;
+        proxy_busy_buffers_size    256k;
     }
 
+    # KONG / CATCH-ALL
     location / {
         proxy_pass http://localhost:$KONG_PORT;
         proxy_set_header Host \$host;
