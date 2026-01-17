@@ -1,6 +1,6 @@
 {
   "name": "@australiawow/setup-dev-stack",
-  "version": "2.1.1",
+  "version": "2.2.2",
   "description": "Automated Nginx/SSL/Docker Stack Orchestrator",
   "main": "setup-dev-stack.sh",
   "bin": {
