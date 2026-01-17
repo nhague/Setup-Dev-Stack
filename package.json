@@ -1,0 +1,19 @@
+{
+  "name": "@nhague/setup-dev-stack",
+  "version": "1.0.0",
+  "description": "Automated Nginx/SSL/Docker Stack Orchestrator",
+  "main": "setup-dev-stack.sh",
+  "bin": {
+    "setup-dev-stack": "setup-dev-stack.sh"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nhague/setup-dev-stack.git"
+  },
+  "engines": {
+    "node": ">=10"
+  }
+}

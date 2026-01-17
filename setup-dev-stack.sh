@@ -1,46 +1,36 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # --- Technical Specification ---
-# Name: setup-dev-stack.sh (Interactive Edition)
-# Version: 7.0
-# Purpose: Interactive orchestration of SSL, DNS, Nginx, and Docker Bridge.
+# Name: setup-dev-stack.sh
+# Version: 7.0 (NPM/GitHub Edition)
 # ----------------------------------------------------------------
 
-# 1. Fact: Script requires sudo for Nginx and Hosts file access
+# 1. Self-Elevate to sudo if not already
 if [[ $EUID -ne 0 ]]; then
-   echo "Fact: This script modifies system networking and requires sudo."
    exec sudo "$0" "$@"
    exit $?
 fi
 
 clear
 echo "------------------------------------------------"
-echo "🚀 SETUP DEV STACK: INTERACTIVE DEV SETUP"
+echo "🚀 SETUP-DEV-STACK: INTERACTIVE SETUP"
 echo "------------------------------------------------"
 
-# 2. Interactive Prompts
+# 2. Prompts
 read -p "Enter Client Slug (e.g., companyx): " CLIENT
 read -p "Enter Domain (e.g., companyx.com): " DOMAIN
 
-# Logic: Check if current folder is the project folder
 CURRENT_DIR=$(pwd)
 echo "Current folder: $CURRENT_DIR"
-read -p "Is this the project root folder? (y/n): " IS_CURRENT
+read -p "Is this the project root? (y/n): " IS_CURRENT
 
 if [[ "$IS_CURRENT" == "y" || "$IS_CURRENT" == "Y" ]]; then
     PROJECT_DIR=$CURRENT_DIR
 else
-    read -p "Enter the full path to the project folder: " PROJECT_DIR
+    read -p "Enter full path to project: " PROJECT_DIR
 fi
 
-# Logic: Verify project folder exists
-if [ ! -d "$PROJECT_DIR" ]; then
-    echo "Error: Path $PROJECT_DIR does not exist."
-    exit 1
-fi
-
-# 3. Environment Variables (Internal Ports)
-# Fact: Standardizing on your Five Star stack defaults
+# 3. Variables (Constants for your specific stack)
 H_PORT=8081
 K_PORT=8080
 PG_PORT=5050
@@ -55,7 +45,7 @@ done
 mkcert -install >/dev/null 2>&1
 
 # 5. SSL Automation
-echo "Step 2/5: Automating SSL Trust for $DOMAIN..."
+echo "Step 2/5: Automating SSL Trust..."
 CERT_DIR="$HOME/certs/$CLIENT"
 mkdir -p "$CERT_DIR"
 mkcert -cert-file "$CERT_DIR/cert.pem" -key-file "$CERT_DIR/key.pem" \
@@ -66,8 +56,8 @@ echo "Step 3/5: Updating /etc/hosts..."
 sed -i '' "/$DOMAIN/d" /etc/hosts
 echo "127.0.0.1  api.$DOMAIN auth.$DOMAIN console.$DOMAIN db-admin.$DOMAIN app.$DOMAIN $DOMAIN" >> /etc/hosts
 
-# 7. Native Nginx Logic
-echo "Step 4/5: Configuring Native Nginx Gateway..."
+# 7. Nginx Logic
+echo "Step 4/5: Configuring Nginx Gateway..."
 NGINX_SERVERS="/opt/homebrew/etc/nginx/servers"
 cat <<EOF > "$NGINX_SERVERS/$CLIENT.conf"
 server {
@@ -116,31 +106,9 @@ server {
         proxy_buffers 4 256k;
     }
 }
-
-server {
-    listen 443 ssl;
-    server_name console.$DOMAIN;
-    ssl_certificate $CERT_DIR/cert.pem;
-    ssl_certificate_key $CERT_DIR/key.pem;
-    location / {
-        proxy_pass http://localhost:$H_PORT;
-        proxy_set_header Host \$host;
-    }
-}
-
-server {
-    listen 443 ssl;
-    server_name db-admin.$DOMAIN;
-    ssl_certificate $CERT_DIR/cert.pem;
-    ssl_certificate_key $CERT_DIR/key.pem;
-    location / {
-        proxy_pass http://localhost:$PG_PORT;
-        proxy_set_header Host \$host;
-    }
-}
 EOF
 
-# 8. Docker Bridge Logic
+# 8. Docker Bridge
 echo "Step 5/5: Generating Docker Override..."
 cat <<EOF > "$PROJECT_DIR/docker-compose.override.yml"
 version: '3.8'
@@ -158,20 +126,14 @@ services:
       - "auth.$DOMAIN:host.docker.internal"
 EOF
 
-# Fix permissions for the actual user (not root)
+# Reset Ownership
 REAL_USER=${SUDO_USER:-$(whoami)}
 chown "$REAL_USER" "$PROJECT_DIR/docker-compose.override.yml"
 chown -R "$REAL_USER" "$CERT_DIR"
 
-# 9. Execution
-echo "Reloading Nginx..."
+# 9. Reload
 /opt/homebrew/bin/nginx -t && sudo /opt/homebrew/bin/brew services restart nginx
 
 echo "------------------------------------------------"
 echo "✅ SETUP SUCCESSFUL: $DOMAIN"
 echo "------------------------------------------------"
-echo "Infrastructure active on Port 443 (SSL)"
-echo "Internal Bridge: Docker -> host.docker.internal"
-echo "------------------------------------------------"
-echo "Fact: Point your Expo .env to https://api.$DOMAIN"
-echo "Fact: Import rootCA.pem to your mobile phone for SSL trust."
