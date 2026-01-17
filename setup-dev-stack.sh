@@ -2,63 +2,82 @@
 
 # --- Technical Specification ---
 # Name: setup-dev-stack.sh
-# Version: 7.0 (NPM/GitHub Edition)
+# Version: 1.1.0 (Self-Healing Edition)
 # ----------------------------------------------------------------
 
-# 1. Self-Elevate to sudo if not already
+# MODULE 0: NATIVE DEPENDENCY CHECK (Runs as User)
+echo "Step 1/6: Verifying Native Dependencies..."
+
+# Check for Homebrew
+if ! command -v brew >/dev/null 2>&1; then
+    echo "Fact: Homebrew not detected. Installing..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+fi
+
+# Check and Install Nginx/mkcert
+for tool in nginx mkcert; do
+    if ! command -v $tool >/dev/null 2>&1; then
+        echo "Fact: $tool missing. Installing via Homebrew..."
+        brew install $tool
+    else
+        echo "Fact: $tool detected."
+    fi
+done
+
+# MODULE 1: PRIVILEGE ELEVATION (The Switch)
 if [[ $EUID -ne 0 ]]; then
+   echo "Fact: Dependencies synced. Elevating to sudo for Networking/Nginx..."
    exec sudo "$0" "$@"
    exit $?
 fi
 
+# From here on, we are ROOT
 clear
 echo "------------------------------------------------"
-echo "🚀 SETUP-DEV-STACK: INTERACTIVE SETUP"
+echo "🚀 NHAGUE DEV-STACK: INTERACTIVE SETUP"
 echo "------------------------------------------------"
 
-# 2. Prompts
+# MODULE 2: PROMPTS
 read -p "Enter Client Slug (e.g., companyx): " CLIENT
 read -p "Enter Domain (e.g., companyx.com): " DOMAIN
 
 CURRENT_DIR=$(pwd)
-echo "Current folder: $CURRENT_DIR"
-read -p "Is this the project root? (y/n): " IS_CURRENT
-
+read -p "Is this the project root? ($CURRENT_DIR) (y/n): " IS_CURRENT
 if [[ "$IS_CURRENT" == "y" || "$IS_CURRENT" == "Y" ]]; then
     PROJECT_DIR=$CURRENT_DIR
 else
     read -p "Enter full path to project: " PROJECT_DIR
 fi
 
-# 3. Variables (Constants for your specific stack)
-H_PORT=8081
-K_PORT=8080
-PG_PORT=5050
-KONG_PORT=8000
-MINIO_PORT=9000
+# MODULE 3: SSL AUTOMATION
+echo "Step 3/6: Automating SSL Trust..."
+# Fact: We must use the REAL_USER path for certs so they are accessible
+REAL_USER=${SUDO_USER:-$(whoami)}
+USER_HOME=$(eval echo "~$REAL_USER")
+CERT_DIR="$USER_HOME/certs/$CLIENT"
 
-# 4. Dependency Sync
-echo "Step 1/5: Syncing Native Dependencies..."
-for tool in nginx mkcert; do
-    command -v $tool >/dev/null 2>&1 || brew install $tool
-done
-mkcert -install >/dev/null 2>&1
-
-# 5. SSL Automation
-echo "Step 2/5: Automating SSL Trust..."
-CERT_DIR="$HOME/certs/$CLIENT"
 mkdir -p "$CERT_DIR"
-mkcert -cert-file "$CERT_DIR/cert.pem" -key-file "$CERT_DIR/key.pem" \
+# Run mkcert as the real user to ensure it touches their local keychain
+sudo -u "$REAL_USER" mkcert -install >/dev/null 2>&1
+sudo -u "$REAL_USER" mkcert -cert-file "$CERT_DIR/cert.pem" -key-file "$CERT_DIR/key.pem" \
     "$DOMAIN" "*.$DOMAIN" "localhost" "127.0.0.1" >/dev/null 2>&1
 
-# 6. DNS Spoofing
-echo "Step 3/5: Updating /etc/hosts..."
+# MODULE 4: DNS SPOOFING
+echo "Step 4/6: Updating /etc/hosts..."
 sed -i '' "/$DOMAIN/d" /etc/hosts
 echo "127.0.0.1  api.$DOMAIN auth.$DOMAIN console.$DOMAIN db-admin.$DOMAIN app.$DOMAIN $DOMAIN" >> /etc/hosts
 
-# 7. Nginx Logic
-echo "Step 4/5: Configuring Nginx Gateway..."
-NGINX_SERVERS="/opt/homebrew/etc/nginx/servers"
+# MODULE 5: NGINX GATEWAY
+echo "Step 5/6: Configuring Nginx Gateway..."
+NGINX_ROOT="/opt/homebrew/etc/nginx"
+NGINX_SERVERS="$NGINX_ROOT/servers"
+mkdir -p "$NGINX_SERVERS"
+
+# Fact: Mapping your Five Star stack ports
+H_PORT=8081
+K_PORT=8080
+KONG_PORT=8000
+
 cat <<EOF > "$NGINX_SERVERS/$CLIENT.conf"
 server {
     listen 443 ssl;
@@ -78,12 +97,6 @@ server {
         proxy_pass http://localhost:$K_PORT/auth;
         proxy_set_header Host \$host;
         proxy_buffer_size 128k;
-        proxy_buffers 4 256k;
-    }
-
-    location /files {
-        proxy_pass http://localhost:$MINIO_PORT;
-        proxy_set_header Host \$host;
     }
 
     location / {
@@ -93,23 +106,10 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
-
-server {
-    listen 443 ssl;
-    server_name auth.$DOMAIN;
-    ssl_certificate $CERT_DIR/cert.pem;
-    ssl_certificate_key $CERT_DIR/key.pem;
-    location / {
-        proxy_pass http://localhost:$K_PORT;
-        proxy_set_header Host \$host;
-        proxy_buffer_size 128k;
-        proxy_buffers 4 256k;
-    }
-}
 EOF
 
-# 8. Docker Bridge
-echo "Step 5/5: Generating Docker Override..."
+# MODULE 6: DOCKER BRIDGE
+echo "Step 6/6: Generating Docker Override..."
 cat <<EOF > "$PROJECT_DIR/docker-compose.override.yml"
 version: '3.8'
 services:
@@ -120,19 +120,14 @@ services:
   auth-webhook:
     extra_hosts:
       - "auth.$DOMAIN:host.docker.internal"
-  kong:
-    extra_hosts:
-      - "api.$DOMAIN:host.docker.internal"
-      - "auth.$DOMAIN:host.docker.internal"
 EOF
 
-# Reset Ownership
-REAL_USER=${SUDO_USER:-$(whoami)}
 chown "$REAL_USER" "$PROJECT_DIR/docker-compose.override.yml"
 chown -R "$REAL_USER" "$CERT_DIR"
 
-# 9. Reload
-/opt/homebrew/bin/nginx -t && sudo /opt/homebrew/bin/brew services restart nginx
+# RELOAD
+echo "Reloading Nginx Native..."
+/opt/homebrew/bin/nginx -t && /opt/homebrew/bin/brew services restart nginx
 
 echo "------------------------------------------------"
 echo "✅ SETUP SUCCESSFUL: $DOMAIN"
